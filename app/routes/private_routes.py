@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Request
 import psycopg2
 from app.db import get_db_connection
-from app.models.request import Post, UsernameCheckRequest
+from app.models.request import IDRequest, Post, UpdatePostRequest, UsernameCheckRequest
 
 
 privateRoutes = APIRouter(
@@ -32,6 +32,56 @@ def create_post(request: Request, post: Post):
             conn.close()
 
     return {"post_id": post_id}
+
+
+@privateRoutes.put("/posts")
+def create_post(request: Request, post: UpdatePostRequest):
+    user_id = request.state.x_user_id
+
+    conn = None
+    post_id = None
+    try:
+        conn = get_db_connection()
+
+        cur = conn.cursor()
+        cur.execute("""update posts set (title, content) = (%s, %s) where user_id=%s and post_id=%s returning post_id;""",
+                    (post.title, post.content, user_id, post.id))
+        post_id = cur.fetchone()[0]
+        conn.commit()
+        cur.close()
+    except (Exception, psycopg2.DatabaseError) as error:
+        print(error)
+        return {"error": "database error"}
+    finally:
+        if conn is not None:
+            conn.close()
+
+    return {"post_id": post_id}
+
+
+@privateRoutes.delete("/posts")
+def create_post(request: Request, post: IDRequest):
+    user_id = request.state.x_user_id
+
+    conn = None
+    rows_deleted = 0
+    try:
+        conn = get_db_connection()
+
+        cur = conn.cursor()
+        cur.execute("""delete from posts where user_id=%s and post_id=%s;""",
+                    (user_id, post.id))
+        rows_deleted = cur.rowcount
+        conn.commit()
+        cur.close()
+    except (Exception, psycopg2.DatabaseError) as error:
+        print(error)
+        return {"error": "database error"}
+    finally:
+        if conn is not None:
+            conn.close()
+
+    return {"rows_deleted": rows_deleted}
 
 
 @privateRoutes.get("/extra_user_infos")
