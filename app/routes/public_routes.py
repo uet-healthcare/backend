@@ -13,7 +13,7 @@ publicRoutes = APIRouter(
 
 
 @publicRoutes.get("/posts")
-def get_posts(offset: Optional[str] = None, limit: Optional[str] = None, id: Optional[str] = None, username: Optional[str] = None):
+def get_posts(offset: Optional[int] = None, limit: Optional[int] = None, id: Optional[int] = None, username: Optional[str] = None):
     conn = None
     posts = []
     try:
@@ -21,38 +21,76 @@ def get_posts(offset: Optional[str] = None, limit: Optional[str] = None, id: Opt
 
         cur = conn.cursor()
 
-        conditions = []
+        condition_names = []
+        condition_values = []
         if id is not None:
-            conditions.append("post_id={}".format(id))
+            condition_names.append("posts.post_id=%s")
+            condition_values.append(id)
         if username is not None:
-            conditions.append(
-                "users.raw_user_meta_data->>'username'='{}'".format(username))
+            condition_names.append(
+                "profiles.username=%s")
+            condition_values.append(username)
+        conditions = (" and " + " and ".join(condition_names)
+                      ) if len(condition_names) > 0 else ""
 
-        condition = " and ".join(conditions)
-        if len(condition) > 0:
-            condition = "where " + condition
+        other_property_names = []
+        other_property_values = []
+        if offset is not None:
+            other_property_names.append("offset %s")
+            other_property_values.append(offset)
+        if limit is not None:
+            other_property_names.append("limit %s")
+            other_property_values.append(limit)
+        other_properties = " ".join(other_property_names)
 
+        sql = None
+        params = None
         if id is not None:
-            cur.execute(
-                """select post_id, title, content, created_time, users.raw_user_meta_data->>'full_name' as full_name, users.raw_user_meta_data->>'username' as username, users.raw_user_meta_data->>'avatar_url' as avatar_url from posts inner join auth.users on posts.user_id = users.id {};""".format(condition))
+            sql = """select
+    posts.post_id,
+    posts.status,
+    posts.title,
+    posts.content,
+    posts.created_at,
+    posts.updated_at,
+    profiles.full_name,
+    profiles.username,
+    profiles.avatar_url
+from posts inner join profiles on posts.user_id = profiles.user_id
+where status='public' {}
+order by posts.updated_at desc;""".format(conditions)
+            params = tuple(condition_values)
         else:
-            cur.execute(
-                """select posts.post_id, posts.title, substring(posts.content, 1, 210) as content, posts.created_time, users.raw_user_meta_data->>'full_name' as full_name, users.raw_user_meta_data->>'username' as username, users.raw_user_meta_data->>'avatar_url' as avatar_url from posts inner join auth.users on posts.user_id = users.id {} {} {};""".format(
-                    condition,
-                    "offset {}".format(offset) if offset is not None else "",
-                    "limit {}".format(limit) if limit is not None else ""))
+            sql = """select
+    posts.post_id,
+    posts.status,
+    posts.title,
+    substring(posts.content, 1, 210) as content,
+    posts.created_at,
+    posts.updated_at,
+    profiles.full_name,
+    profiles.username,
+    profiles.avatar_url
+from posts inner join profiles on posts.user_id = profiles.user_id
+where status='public' {}
+order by posts.updated_at desc
+{}""".format(conditions, other_properties)
+            params = tuple(condition_values) + tuple(other_property_values)
 
+        cur.execute(sql, params)
         rows = cur.fetchall()
         for row in rows:
             posts.append({
                 "post_id": row[0],
-                "title": row[1],
-                "content": row[2],
-                "created_time": row[3],
+                "status": row[1],
+                "title": row[2],
+                "content": row[3],
+                "created_at": row[4],
+                "updated_at": row[5],
                 "author": {
-                    "full_name": row[4],
-                    "username": row[5],
-                    "avatar_url": row[6]
+                    "full_name": row[6],
+                    "username": row[7],
+                    "avatar_url": row[8]
                 }
             })
 
@@ -64,29 +102,61 @@ def get_posts(offset: Optional[str] = None, limit: Optional[str] = None, id: Opt
         if conn is not None:
             conn.close()
 
-    return posts
+    return {
+        "success": True,
+        "data": posts
+    }
 
 
 @publicRoutes.get("/users/metadata")
-def get_user_metadata(username: str):
+def get_user_metadata(user_id: Optional[str] = None, username: Optional[str] = None):
     conn = None
+    condition = None
+    condition_value = None
+    if user_id is not None:
+        condition = "user_id=%s"
+        condition_value = user_id
+    if username is not None:
+        condition = "username=%s"
+        condition_value = username
+
     try:
         conn = get_db_connection()
 
         cur = conn.cursor()
         cur.execute(
-            """select raw_user_meta_data from auth.users where raw_user_meta_data->>'username' = %s""", [username])
+            """select user_id, username, full_name, avatar_url, bio, about
+from profiles
+where {}""".format(condition), (condition_value,))
         row = cur.fetchone()
         cur.close()
 
         if len(row) > 0:
-            return row[0]
+            return {
+                "success": True,
+                "data": {
+                    "user_id": row[0],
+                    "username": row[1],
+                    "full_name": row[2],
+                    "avatar_url": row[3],
+                    "bio": row[4],
+                    "about": row[5],
+                }
+            }
         else:
-            return None
+            return {
+                "success": False,
+                "error": "User not found",
+            }
 
     except (Exception, psycopg2.DatabaseError) as error:
         print(error)
-        return {"error": "database error"}
+        return {
+            "success": False,
+            "error": {
+                "message": "database error"
+            }
+        }
     finally:
         if conn is not None:
             conn.close()
