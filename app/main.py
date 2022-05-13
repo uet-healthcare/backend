@@ -25,7 +25,7 @@ async def add_user_id_to_header(request: Request, call_next):
     if request.url.path.startswith("/private"):
         payload = request.headers.get("Authorization").split(".")[1]
         decoded = json.loads(
-            (base64.b64decode(payload + "="*divmod(len(payload), 4)[1])).decode("utf-8"))
+            (base64.urlsafe_b64decode(payload + "="*divmod(len(payload), 4)[1])).decode("utf-8"))
         request.state.x_user_id = decoded.get("sub")
 
     response = await call_next(request)
