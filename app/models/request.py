@@ -26,3 +26,9 @@ class UpdateUserMetadataRequest(BaseModel):
     avatar_url: Optional[str] = None
     bio: Optional[str] = None
     about: Optional[str] = None
+
+
+class Comment(BaseModel):
+    parent_comment_id: Optional[int] = None
+    post_id: int
+    content: str

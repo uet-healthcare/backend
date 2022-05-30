@@ -2,7 +2,7 @@ from typing import Optional
 from fastapi import APIRouter, Request
 import psycopg2
 from app.db import get_db_connection
-from app.models.request import IDRequest, UpdatePostRequest, UpdateUserMetadataRequest, UsernameCheckRequest
+from app.models.request import IDRequest, UpdatePostRequest, UpdateUserMetadataRequest, UsernameCheckRequest, Comment
 
 
 privateRoutes = APIRouter(
@@ -342,3 +342,38 @@ def update_user_metadata(request: Request, metadata: UpdateUserMetadataRequest):
                 "message": "cannot update user metadata."
             }
         }
+
+
+@privateRoutes.post("/comments")
+def create_comment(request: Request, comment: Comment):
+    user_id = request.state.x_user_id
+    conn = None
+    comment_id = None
+    try:
+        conn = get_db_connection()
+
+        cur = conn.cursor()
+        sql = """insert into comments (post_id, parent_comment_id, user_id, content) values (%s, %s, %s, %s) returning comment_id;"""
+        cur.execute(
+            sql, (comment.post_id, comment.parent_comment_id, user_id, comment.content))
+        comment_id = cur.fetchone()[0]
+        conn.commit()
+        cur.close()
+    except (Exception, psycopg2.DatabaseError) as error:
+        print(error)
+        return {
+            "success": False,
+            "error": {
+                "message": "database error"
+            }
+        }
+    finally:
+        if conn is not None:
+            conn.close()
+
+    return {
+        "success": True,
+        "data": {
+            "comment_id": comment_id
+        }
+    }
